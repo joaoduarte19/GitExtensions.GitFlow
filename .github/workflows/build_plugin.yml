@@ -1,36 +1,101 @@
-name: Build Git Extensions plugin
+name: Build plugin
 
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
 
-on: [push] #At every git push
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
-# on:
-#   push:
-#     tags:  #When git push a tag with format `vX.Y.Z`
-#     - 'v\d.\d.\d'
+env:
+  DOTNET_VERSION: '10.0.x'
+  # Git Extensions release whose assemblies the plugin is compiled against
+  # (the build references them through the $(GitExtensionsPath) MSBuild property).
+  # Bump this when targeting a newer Git Extensions 7.x release.
+  GE_RELEASE_TAG: 'v7.0.1'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 jobs:
   build:
+    runs-on: windows-latest
 
-    runs-on: [windows-latest]
+    defaults:
+      run:
+        shell: pwsh
 
     steps:
-    - uses: actions/checkout@v1
+      - uses: actions/checkout@v4
 
-    - name: Setup .NET Core
-      uses: actions/setup-dotnet@v1
-      with:
-        dotnet-version: 2.2.108
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: Setup MSBuild.exe
-      uses: warrenbuckley/Setup-MSBuild@v1
+      - name: Resolve Git Extensions assemblies
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $headers = @{
+            Authorization          = "Bearer $env:GH_TOKEN"
+            Accept                 = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $release = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/gitextensions/gitextensions/releases/tags/$env:GE_RELEASE_TAG"
+          $asset = $release.assets | Where-Object { $_.name -like 'GitExtensions-Portable-x64-*.zip' } | Select-Object -First 1
+          if (-not $asset) { throw "No portable x64 asset found in Git Extensions release $env:GE_RELEASE_TAG" }
 
-    - name: Build & package with `msbuild`
-      run: |
-        msbuild -target:restore -property:Configuration=Release
-        msbuild -target:pack -property:Configuration=Release
+          Write-Host "Downloading $($asset.name)"
+          $zip = Join-Path $env:RUNNER_TEMP 'gitextensions.zip'
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zip
 
-    # - name: Push to `Nuget.org` nuget feed
-    #   run: |
-    #     cd "src/GitExtensions.PluginTemplate/bin/Release"
-    #     # Set your nuget token in a `NUGET_PUSH_TOKEN` GitHub secrets. See https://help.github.com/en/actions/configuring-and-managing-workflows/creating-and-storing-encrypted-secrets
-    #     dotnet nuget push *.nupkg -k ${{ secrets.NUGET_PUSH_TOKEN }} -s https://api.nuget.org/v3/index.json -n true
+          $dest = Join-Path $env:RUNNER_TEMP 'GitExtensions'
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+
+          $marker = Get-ChildItem -Path $dest -Recurse -Filter 'GitExtensions.Extensibility.dll' | Select-Object -First 1
+          if (-not $marker) { throw 'GitExtensions.Extensibility.dll not found in the extracted archive' }
+
+          $gePath = $marker.Directory.FullName
+          "GitExtensionsPath=$gePath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "GitExtensionsPath = $gePath"
+
+      - name: Restore
+        run: dotnet restore GitExtensions.GitFlow.slnx
+
+      - name: Build
+        run: dotnet build GitExtensions.GitFlow.slnx -c Release --no-restore
+
+      - name: Pack
+        run: |
+          $versionArgs = @()
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $v = $env:GITHUB_REF_NAME.TrimStart('v')
+            $versionArgs = @("-p:Version=$v")
+            Write-Host "Packing release version $v"
+          }
+          dotnet pack src/GitExtensions.GitFlow/GitExtensions.GitFlow.csproj -c Release --no-restore -o artifacts @versionArgs
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GitExtensions.GitFlow-nupkg
+          path: artifacts/*.nupkg
+          if-no-files-found: error
+
+      # Publishes to NuGet.org only when pushing a version tag (e.g. `v1.0.2`).
+      # Requires a `NUGET_PUSH_TOKEN` repository secret.
+      - name: Publish to NuGet.org
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_PUSH_TOKEN }}
+        run: |
+          if (-not $env:NUGET_API_KEY) { throw 'NUGET_PUSH_TOKEN secret is not configured' }
+          dotnet nuget push "artifacts/*.nupkg" `
+            --api-key $env:NUGET_API_KEY `
+            --source https://api.nuget.org/v3/index.json `
+            --skip-duplicate

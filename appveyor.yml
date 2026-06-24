@@ -2,33 +2,71 @@
 #      general configuration      #
 #---------------------------------#
 
-# version format
-version: 1.0.0.{build}
+# Build label (independent of the NuGet package version, which comes from the .csproj)
+version: 1.0.{build}
 
-# Do not build on tags (GitHub and BitBucket)
+# Do not build on tags (releases are published from GitHub Actions)
 skip_tags: true
 
-# Maximum number of concurrent jobs for the project
 max_jobs: 1
 
 #---------------------------------#
 #    environment configuration    #
 #---------------------------------#
 
-# Build worker image (VM template)
-image:
-- Visual Studio 2019
+image: Visual Studio 2022
+
+environment:
+  # .NET SDK channel installed below
+  DOTNET_CHANNEL: '10.0'
+  # Git Extensions portable release whose assemblies the plugin is compiled against.
+  # Update both values together when targeting a newer Git Extensions 7.x release.
+  GE_RELEASE_TAG: v7.0.1
+  GE_PORTABLE_URL: https://github.com/gitextensions/gitextensions/releases/download/v7.0.1/GitExtensions-Portable-x64-7.0.1.86-c119a52.zip
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
 
 #---------------------------------#
 #       build configuration       #
 #---------------------------------#
 
-# scripts to run before build
-before_build:
-- ps: nuget restore .\GitExtensions.PluginTemplate.sln
+install:
+  # Install the .NET 10 SDK
+  - ps: |
+      Invoke-WebRequest -Uri 'https://dot.net/v1/dotnet-install.ps1' -OutFile "$env:TEMP\dotnet-install.ps1"
+      & "$env:TEMP\dotnet-install.ps1" -Channel $env:DOTNET_CHANNEL -InstallDir "$env:ProgramFiles\dotnet"
+      dotnet --info
 
-build:
-  # enable MSBuild parallel builds
-  parallel: true
-  # MSBuild verbosity level
-  verbosity: minimal
+  # Download the Git Extensions assemblies referenced through $(GitExtensionsPath)
+  - ps: |
+      $zip = "$env:TEMP\gitextensions.zip"
+      Invoke-WebRequest -Uri $env:GE_PORTABLE_URL -OutFile $zip
+
+      $dest = "$env:APPVEYOR_BUILD_FOLDER\.gitextensions"
+      Expand-Archive -Path $zip -DestinationPath $dest -Force
+
+      $marker = Get-ChildItem -Path $dest -Recurse -Filter 'GitExtensions.Extensibility.dll' | Select-Object -First 1
+      if (-not $marker) { throw 'GitExtensions.Extensibility.dll not found in the extracted archive' }
+
+      Set-AppveyorEnvironmentVariable -Name GitExtensionsPath -Value $marker.Directory.FullName
+      Write-Host "GitExtensionsPath = $($marker.Directory.FullName)"
+
+build_script:
+  - dotnet build GitExtensions.GitFlow.slnx -c Release
+
+after_build:
+  - dotnet pack src/GitExtensions.GitFlow/GitExtensions.GitFlow.csproj -c Release -o artifacts
+
+#---------------------------------#
+#       tests configuration       #
+#---------------------------------#
+
+test: off
+
+#---------------------------------#
+#         artifacts config        #
+#---------------------------------#
+
+artifacts:
+  - path: artifacts\*.nupkg
+    name: nupkg
