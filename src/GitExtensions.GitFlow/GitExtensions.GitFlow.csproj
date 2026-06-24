@@ -1,0 +1,96 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <VersionPrefix>1.0.1</VersionPrefix>
+    <UseWindowsForms>true</UseWindowsForms>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Habilita a sintaxe anulável (?) sem ligar a análise — silencia os avisos CS8632 -->
+    <Nullable>annotations</Nullable>
+    <!-- Plugin: não copiar assemblies de pacotes para bin (o host fornece em runtime) -->
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <!-- Build local gera só a DLL; empacotar sob demanda com `dotnet pack` -->
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <!-- Plugin não usa .deps.json (o host resolve as dependências); manter o output só com a DLL -->
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <!-- Referenciamos o conjunto de binários do GitExtensions (o host os resolve em runtime);
+         conflitos de versão na árvore transitiva (MSB3277) são esperados e inofensivos aqui -->
+    <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
+  </PropertyGroup>
+
+  <!-- Recursos: apenas Resource.resx / Resource.Designer.cs existem (singular) -->
+  <ItemGroup>
+    <Compile Update="Properties\Resource.Designer.cs">
+      <DesignTime>True</DesignTime>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Resource.resx</DependentUpon>
+    </Compile>
+    <EmbeddedResource Update="Properties\Resource.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resource.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- No Visual Studio (incl. o designer do WinForms) copiamos os binários do GitExtensions
+       para o output, para o designer resolver a classe base; na linha de comando (deploy) não. -->
+  <PropertyGroup>
+    <GeReferencesPrivate Condition="'$(BuildingInsideVisualStudio)' == 'true'">true</GeReferencesPrivate>
+    <GeReferencesPrivate Condition="'$(GeReferencesPrivate)' == ''">false</GeReferencesPrivate>
+  </PropertyGroup>
+
+  <!-- DLLs do GitExtensions 7.0 instalado (o host as fornece em runtime) -->
+  <ItemGroup>
+    <Reference Include="GitExtensions.Extensibility">
+      <HintPath>$(GitExtensionsPath)\GitExtensions.Extensibility.dll</HintPath>
+      <Private>$(GeReferencesPrivate)</Private>
+    </Reference>
+    <Reference Include="GitCommands">
+      <HintPath>$(GitExtensionsPath)\GitCommands.dll</HintPath>
+      <Private>$(GeReferencesPrivate)</Private>
+    </Reference>
+    <Reference Include="GitExtUtils">
+      <HintPath>$(GitExtensionsPath)\GitExtUtils.dll</HintPath>
+      <Private>$(GeReferencesPrivate)</Private>
+    </Reference>
+    <Reference Include="ResourceManager">
+      <HintPath>$(GitExtensionsPath)\ResourceManager.dll</HintPath>
+      <Private>$(GeReferencesPrivate)</Private>
+    </Reference>
+    <!-- Provê [Export] na MESMA versão do host (assembly 4.0.0.0), igual aos plugins oficiais -->
+    <Reference Include="System.ComponentModel.Composition">
+      <HintPath>$(GitExtensionsPath)\System.ComponentModel.Composition.dll</HintPath>
+      <Private>$(GeReferencesPrivate)</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Empacotamento opcional sob demanda: `dotnet pack -c Release` usa o .nuspec -->
+  <PropertyGroup>
+    <NuspecFile>$(MSBuildThisFileDirectory)$(MSBuildProjectName).nuspec</NuspecFile>
+    <Authors>João Antônio Duarte</Authors>
+    <Company>JR Sistemas e Tecnologia LTDA</Company>
+    <Description>GitExtensions plugin for integration with GitFlow</Description>
+    <PackageProjectUrl>https://github.com/joaoduarte19/GitExtensions.GitFlow</PackageProjectUrl>
+    <PackageTags>GitExtensions</PackageTags>
+  </PropertyGroup>
+  <Target Name="SetPackageProperties" BeforeTargets="GenerateNuspec">
+    <PropertyGroup>
+      <NuspecProperties>
+        id=$(PackageId);
+        version=$(PackageVersion);
+        configuration=$(Configuration);
+        tags=$(PackageTags.Replace(';',' '));
+        projectUrl=$(PackageProjectUrl);
+        iconUrl=$(PackageIconUrl);
+        repositoryUrl=$(RepositoryUrl);
+        repositoryType=$(RepositoryType);
+        repositoryCommit=$(RepositoryCommit);
+        author=$(Authors);
+        copyright=$(Copyright);
+        description=$(Description);
+        targetDir=$(TargetDir);
+      </NuspecProperties>
+    </PropertyGroup>
+  </Target>
+
+</Project>
