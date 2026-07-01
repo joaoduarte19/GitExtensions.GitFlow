@@ -1,0 +1,73 @@
+<Project>
+
+  <!--
+    COMPILE-TIME references pinned to the GitExtensions 7.0.x floor.
+
+    Why: the GitExtensions assemblies are not strong-named and their AssemblyVersion
+    tracks the exact product build (e.g. 7.1.0.87). The .NET loader accepts a host
+    assembly whose version is GREATER than or equal to the referenced one (roll-forward),
+    but REFUSES a lower one. If the plugin is compiled against an installed 7.1.0, it
+    records a reference to 7.1.0.x and fails to load on a 7.0.1 host (FileLoadException).
+
+    So we ALWAYS compile against the lowest supported 7.x (the "floor"). That way the
+    binary loads across the whole 7.x line via roll-forward. The installed host (any 7.x)
+    is used only for F5/debug, via GitExtensionsExecutablePath — never for references.
+  -->
+  <PropertyGroup>
+    <!-- GitExtensions release used as the compatibility floor (bump when retargeting). -->
+    <GitExtensionsRefTag Condition="'$(GitExtensionsRefTag)' == ''">v7.0.1</GitExtensionsRefTag>
+    <!-- Portable x64 matching the floor (same URL used by CI). -->
+    <GitExtensionsRefUrl Condition="'$(GitExtensionsRefUrl)' == ''">https://github.com/gitextensions/gitextensions/releases/download/v7.0.1/GitExtensions-Portable-x64-7.0.1.86-c119a52.zip</GitExtensionsRefUrl>
+    <!-- Local cache for the downloaded refs (git-ignored). -->
+    <GitExtensionsRefCache Condition="'$(GitExtensionsRefCache)' == ''">$(MSBuildThisFileDirectory).gitextensions-ref\$(GitExtensionsRefTag)\</GitExtensionsRefCache>
+    <!--
+      GitExtensionsRefPath is what the .csproj HintPaths consume.
+      - If the dev/CI already set it (csproj.user, environment variable, -p:), we honor it
+        and download nothing.
+      - Otherwise it falls back to the local cache, provisioned by the target below.
+    -->
+    <GitExtensionsRefPath Condition="'$(GitExtensionsRefPath)' == ''">$(GitExtensionsRefCache)</GitExtensionsRefPath>
+  </PropertyGroup>
+
+  <!--
+    Provisions the floor refs into the cache before reference resolution.
+    Only acts in automatic mode (RefPath == cache). The glob runs on every build (cheap
+    once cached) to point RefPath at the real DLL directory — the portable may extract
+    into a subfolder. The download only happens when the marker does not exist yet.
+  -->
+  <Target Name="EnsureGitExtensionsRefAssemblies"
+          BeforeTargets="ResolveAssemblyReferences;BeforeBuild"
+          Condition="'$(GitExtensionsRefPath)' == '$(GitExtensionsRefCache)'">
+
+    <ItemGroup>
+      <_GeRefMarker Include="$(GitExtensionsRefCache)**\GitExtensions.Extensibility.dll" />
+    </ItemGroup>
+
+    <Message Condition="'@(_GeRefMarker)' == ''" Importance="high"
+             Text="Downloading GitExtensions $(GitExtensionsRefTag) reference assemblies (compatibility floor)..." />
+    <MakeDir Condition="'@(_GeRefMarker)' == ''" Directories="$(GitExtensionsRefCache)" />
+    <DownloadFile Condition="'@(_GeRefMarker)' == ''"
+                  SourceUrl="$(GitExtensionsRefUrl)"
+                  DestinationFolder="$(GitExtensionsRefCache)"
+                  SkipUnchangedFiles="true">
+      <Output TaskParameter="DownloadedFile" PropertyName="_GeRefZip" />
+    </DownloadFile>
+    <Unzip Condition="'@(_GeRefMarker)' == ''"
+           SourceFiles="$(_GeRefZip)"
+           DestinationFolder="$(GitExtensionsRefCache)"
+           OverwriteReadOnlyFiles="true" />
+
+    <!-- Re-locate the marker after the possible extraction and pin RefPath to its directory. -->
+    <ItemGroup>
+      <_GeRefMarker Remove="@(_GeRefMarker)" />
+      <_GeRefMarker Include="$(GitExtensionsRefCache)**\GitExtensions.Extensibility.dll" />
+    </ItemGroup>
+    <Error Condition="'@(_GeRefMarker)' == ''"
+           Text="GitExtensions.Extensibility.dll not found after extracting $(GitExtensionsRefUrl)." />
+    <PropertyGroup>
+      <GitExtensionsRefPath>%(_GeRefMarker.RootDir)%(_GeRefMarker.Directory)</GitExtensionsRefPath>
+    </PropertyGroup>
+    <Message Importance="high" Text="GitExtensionsRefPath = $(GitExtensionsRefPath)" />
+  </Target>
+
+</Project>

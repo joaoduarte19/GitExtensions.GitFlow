@@ -37,7 +37,7 @@ install:
       & "$env:TEMP\dotnet-install.ps1" -Channel $env:DOTNET_CHANNEL -InstallDir "$env:ProgramFiles\dotnet"
       dotnet --info
 
-  # Download the Git Extensions assemblies referenced through $(GitExtensionsPath)
+  # Download the Git Extensions assemblies referenced through $(GitExtensionsRefPath)
   - ps: |
       $zip = "$env:TEMP\gitextensions.zip"
       Invoke-WebRequest -Uri $env:GE_PORTABLE_URL -OutFile $zip
@@ -48,8 +48,8 @@ install:
       $marker = Get-ChildItem -Path $dest -Recurse -Filter 'GitExtensions.Extensibility.dll' | Select-Object -First 1
       if (-not $marker) { throw 'GitExtensions.Extensibility.dll not found in the extracted archive' }
 
-      Set-AppveyorEnvironmentVariable -Name GitExtensionsPath -Value $marker.Directory.FullName
-      Write-Host "GitExtensionsPath = $($marker.Directory.FullName)"
+      Set-AppveyorEnvironmentVariable -Name GitExtensionsRefPath -Value $marker.Directory.FullName
+      Write-Host "GitExtensionsRefPath = $($marker.Directory.FullName)"
 
 build_script:
   - dotnet build GitExtensions.GitFlow.slnx -c Release

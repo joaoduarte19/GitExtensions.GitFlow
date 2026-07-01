@@ -15,7 +15,7 @@ concurrency:
 env:
   DOTNET_VERSION: '10.0.x'
   # Git Extensions release whose assemblies the plugin is compiled against
-  # (the build references them through the $(GitExtensionsPath) MSBuild property).
+  # (the build references them through the $(GitExtensionsRefPath) MSBuild property).
   # Bump this when targeting a newer Git Extensions 7.x release.
   GE_RELEASE_TAG: 'v7.0.1'
   DOTNET_NOLOGO: 'true'
@@ -61,8 +61,8 @@ jobs:
           if (-not $marker) { throw 'GitExtensions.Extensibility.dll not found in the extracted archive' }
 
           $gePath = $marker.Directory.FullName
-          "GitExtensionsPath=$gePath" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "GitExtensionsPath = $gePath"
+          "GitExtensionsRefPath=$gePath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "GitExtensionsRefPath = $gePath"
 
       - name: Restore
         run: dotnet restore GitExtensions.GitFlow.slnx

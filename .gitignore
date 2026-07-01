@@ -9,6 +9,9 @@
 *.userosscache
 *.sln.docstates
 
+# Assemblies de referência do GitExtensions baixadas para compilar (piso de compatibilidade)
+.gitextensions-ref/
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

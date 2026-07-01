@@ -83,36 +83,55 @@ automatically when an operation changes the repository.
 
 - **.NET 10 SDK**
 - **Visual Studio 2022/2026** with the **.NET Desktop (Windows Forms)** workload, or the `dotnet` CLI
-- A local **Git Extensions 7.0** installation (the build references its assemblies)
+- Internet access on the first build (to fetch the pinned Git Extensions 7.0.1 reference assemblies)
+- A local **Git Extensions 7.x** installation is optional — needed only for F5 debugging, not for the build
+
+### Version compatibility (why the build pins a floor)
+
+The Git Extensions assemblies are **not strong-named** and their `AssemblyVersion` tracks the exact
+product build (e.g. `7.1.0.87`). The .NET assembly loader accepts a host assembly whose version is
+**greater than or equal** to the one the plugin was compiled against (roll-forward), but **refuses a
+lower one** (`FileLoadException` at load — the plugin silently never appears). So a plugin compiled
+against a 7.1.0 install fails to load on 7.0.1.
+
+To load across the whole `7.x` line, the plugin must be compiled against the **lowest supported 7.x**
+(the "floor"). [`Directory.Build.targets`](Directory.Build.targets) enforces this: it downloads the
+pinned Git Extensions **7.0.1** portable assemblies into a git-ignored `.gitextensions-ref/` cache and
+points the reference `HintPath`s at them via `$(GitExtensionsRefPath)`. Your *installed* Git Extensions
+version no longer influences the references.
 
 ### Configure the Git Extensions path
 
-The project references Git Extensions assemblies (`GitExtensions.Extensibility.dll`, `GitCommands.dll`,
-`GitExtUtils.dll`, `ResourceManager.dll`, …) via the `GitExtensionsPath` MSBuild property. This
-property is **not** committed (it lives in the git-ignored `*.csproj.user`), so a fresh clone has to
-provide it. Either:
+Compilation references are provisioned automatically from the floor — a fresh clone needs **no**
+configuration to build. The only per-user setting is the **debug host** for F5, which is optional and
+lives in the git-ignored `*.csproj.user`:
 
 - create `src/GitExtensions.GitFlow/GitExtensions.GitFlow.csproj.user`:
 
   ```xml
   <Project>
     <PropertyGroup>
-      <GitExtensionsPath>C:\Program Files\GitExtensions</GitExtensionsPath>
-      <!-- Optional: enables F5 debugging by launching the host -->
+      <!-- Optional: enables F5 debugging by launching your installed host (any 7.x) -->
       <GitExtensionsExecutablePath>C:\Program Files\GitExtensions\GitExtensions.exe</GitExtensionsExecutablePath>
+      <!-- Optional: reuse a local 7.0.x portable extraction for references instead of the auto-download -->
+      <!-- <GitExtensionsRefPath>C:\path\to\GitExtensions-7.0.1</GitExtensionsRefPath> -->
     </PropertyGroup>
   </Project>
   ```
 
-- or pass it on the command line: `-p:GitExtensionsPath="C:\Program Files\GitExtensions"`.
+> **Do not** point the references at your installed `C:\Program Files\GitExtensions` if it is newer
+> than 7.0.1 — that reintroduces the roll-forward problem above. Use `GitExtensionsRefPath` only with a
+> 7.0.x copy.
 
 ### Build
 
 ```bash
-dotnet build src/GitExtensions.GitFlow/GitExtensions.GitFlow.csproj -c Release -p:GitExtensionsPath="C:\Program Files\GitExtensions"
+dotnet build src/GitExtensions.GitFlow/GitExtensions.GitFlow.csproj -c Release
 ```
 
-The build produces only the plugin DLL — the host supplies the shared dependencies at runtime.
+The first build downloads the pinned Git Extensions 7.0.1 reference assemblies into `.gitextensions-ref/`
+(cached for subsequent builds). The build produces only the plugin DLL — the host supplies the shared
+dependencies at runtime.
 
 ### Package (NuGet)
 
